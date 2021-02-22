@@ -52,6 +52,17 @@ fdalloc(struct file *f)
   return -1;
 }
 
+static int
+fdalloc2(struct file *fo, int checkFd){
+  // copies fdalloc, but uses predetermined filedescriptor
+  struct proc *curproc = myproc();
+  if(curproc->ofile[checkFd] == 0){
+    curproc->ofile[checkFd] = fo;
+    return checkFd;
+  }
+  return -1;
+}
+
 int
 sys_dup(void)
 {
@@ -64,6 +75,25 @@ sys_dup(void)
     return -1;
   filedup(f);
   return fd;
+}
+
+int sys_dup2(void){
+
+  struct file *fo;
+
+  int f1, f2;
+  argint(1, &f2);
+  
+  // check if oldfd is valid, otherwise fail (doesn't close newfile, whatever that means)
+  if(argfd(0,&f1,&fo) < 0){
+    return -1;
+  }
+  // if we're here, oldfd is valid
+  if((f2=fdalloc2(fo, f2)) < 0){
+    return -1;
+  }
+  // if we're here, fdalloc copied over oldfd to new pointer
+  return f2;
 }
 
 int
