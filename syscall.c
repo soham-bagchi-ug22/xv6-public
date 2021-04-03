@@ -82,60 +82,6 @@ argstr(int n, char **pp)
   return fetchstr(addr, pp);
 }
 
-// Uses switch(n) to return the syscall name based on
-// syscall.h macros. -S.B. 
-
-char* getsyscallstring(int n){
-  switch(n){
-    case 1:
-      return "fork";
-    case 2:
-      return "exit";
-    case 3: 
-      return "wait";
-    case 4:
-      return "pipe";
-    case 5: 
-      return "read";
-    case 6: 
-      return "kill";
-    case 7:
-      return "exec";
-    case 8:
-      return "fstat";
-    case 9:
-      return "chdir";
-    case 10:
-      return "dup";
-    case 11:
-      return "getpid";
-    case 12:
-      return "sbrk";
-    case 13:
-      return "sleep";
-    case 14:
-      return "uptime";
-    case 15:
-      return "open";
-    case 16:
-      return "write";
-    case 17:
-      return "mknod";
-    case 18:
-      return "unlink";
-    case 19:
-      return "link";
-    case 20:
-      return "mkdir";
-    case 21: 
-      return "close";
-    case 22: 
-      return "date";
-    default:
-      return "ERROR: UNRECOGNIZED";
-  }
-}
-
 extern int sys_chdir(void);
 extern int sys_close(void);
 extern int sys_dup(void);
@@ -157,7 +103,6 @@ extern int sys_unlink(void);
 extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
-extern int sys_date(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -181,7 +126,6 @@ static int (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
-[SYS_date]    sys_date,
 };
 
 void
@@ -192,28 +136,6 @@ syscall(void)
 
   num = curproc->tf->eax;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
-    // syscall -> num
-    cprintf("\t%s -> %d\n", getsyscallstring(num), num); 
-    // ARGS: (arg1) (arg2) ...
-    cprintf("\t ARGS: ");
-    int argintStore = -1;
-    int i = 0;
-    // special case for exec, infinite loop of arg==36
-    if(num == 7){
-      while(argintStore != 0 && argintStore != 36){
-        argint(i, &argintStore);
-        cprintf("(%d) ", argintStore);
-        i++;
-      }
-      // otherwise prints all args until arg==0
-    } else {
-      while(argintStore != 0){
-        argint(i, &argintStore);
-        cprintf("(%d) ", argintStore);
-        i++;
-      }
-    }
-    cprintf("\n");
     curproc->tf->eax = syscalls[num]();
   } else {
     cprintf("%d %s: unknown sys call %d\n",
