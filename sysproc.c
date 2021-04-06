@@ -94,14 +94,54 @@ sys_uptime(void)
 
 // Settickets() syscall
 int 
-settickets(int number)
+sys_settickets(void)
 {
+  int num;
+  int return_val = argint(0, &num);
+  if (return_val == -1)
+  {
+    // Indicating that the value obtained at the address stored in %ebx
+    // is not within the current process space. This implies that we need
+    // to revert to the default case of setting the no. of tickets of the 
+    // current process to 1 
+    struct proc *ptr = myproc();
+    ptr->tickets = 1;
+    return 0;
+    
+  }
+  else 
+  {
+    if (num < 1)
+    {
+      // User passed in a number that is less that 1
+      return -1;  
+    }
 
+    struct proc *ptr = myproc();
+    ptr->tickets = num;
+    return 0;
+
+  }
 }
 
 // Getpinfo() syscall
 int 
-getpinfo(struct pstat*)
+sys_getpinfo(void)
 {
+  // Check if the pointer that the user entered is valid
+  // i.e., check if it is not a bad/NULL pointer
+
+  struct pstat *ptr1;
+  int return_val = argptr(0, (void*)&ptr1, sizeof(*ptr1));
+  if (return_val != 0)
+  {
+    return -1;
+  }
+  else
+  {
+    
+
+  }
+
 
 }
