@@ -89,3 +89,40 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+// set process priority
+int
+sys_setpriority(void)
+{
+  int p_pid;
+  int p_priority;
+  int *ppid = &p_pid;
+  int *ppriority = &p_priority;
+
+  int return_pid = argptr(0, (void*)&ppid, sizeof(*ppid));
+  int return_priority = argptr(1, (void*)&ppriority, sizeof(*ppriority));
+
+  if(return_pid != 0 || return_priority != 0) {
+    return -1;
+  }
+  else {
+    //insert function call here
+    return setpriority(p_pid, p_priority);
+  }
+}
+
+//get process priority
+int
+sys_getpriority(void)
+{
+  int p_pid;
+  int *ppid = &p_pid;
+
+  int return_pid = argptr(0, (void *)&ppid, sizeof(int));
+
+  if(return_pid != 0)
+    return -1;
+  else {
+    return getpriority(p_pid);
+  }
+}

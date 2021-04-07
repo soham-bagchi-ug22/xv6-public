@@ -10,15 +10,56 @@
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
+  uint PromoteAtTime; // MLFQ TICKS (SOHAM BAGCHI)
 } ptable;
 
 static struct proc *initproc;
+
+struct proc *queueHead[MAXPRIORITY];
+struct proc *queueTail[MAXPRIORITY];
 
 int nextpid = 1;
 extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+
+// SOHAM BAGCHI LINKED LIST QUEUE FUNCTIONS
+int
+enqueue(struct proc *p, int priority){
+	if(queueHead[priority] == queueTail[priority] && queueTail[priority] == (struct proc *) 0) {
+		queueHead[priority] = p;
+		queueTail[priority] = p;
+    queueHead[priority]->next = (struct proc *) 0;
+		return 0;
+	}
+	else {
+		queueTail[priority]->next = p;
+		queueTail[priority] = p;
+		return 0;
+	}
+}
+
+struct proc *
+dequeue(int priority){
+	if(queueHead[priority] == queueTail[priority] && queueTail[priority] == (struct proc *) 0) { // It is empty
+		return (struct proc *) -1;
+	}
+	else {
+		struct proc *retProc = queueHead[priority];
+		queueHead[priority] = retProc->next;
+		return retProc;
+	}
+}
+
+int
+isEmpty(int priority){
+	if(queueHead[priority] == (struct proc *) 0 && queueTail[priority] == (struct proc *) 0)
+		return 0;
+	else return -1;
+}
+
+
 
 void
 pinit(void)
@@ -115,6 +156,33 @@ found:
   return p;
 }
 
+// Gets process priority level => SOHAM BAGCHI
+int
+getpriority(int pidIn){
+  struct proc *curproc = myproc();
+  if(curproc->state != UNUSED){
+    return curproc->priority;
+  }
+  else return -1;
+}
+
+// Sets process priority level => SOHAM BAGCHI
+int
+setpriority(int pidIn, int priorityIn){
+  struct proc *p;
+  if(priorityIn >= MAXPRIORITY) return -1;
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == pidIn){
+      p->priority = priorityIn;
+      p->budget = DEFAULT_BUDGET;
+      enqueue(p, priorityIn);
+    }
+  }
+  release(&ptable.lock);
+  return -1;
+}
+
 //PAGEBREAK: 32
 // Set up first user process.
 void
@@ -125,6 +193,12 @@ userinit(void)
 
   p = allocproc();
   
+  // Initialize MLFQ Queues => SOHAM BAGCHI
+  for(int i = 0; i < MAXPRIORITY; i++){
+    queueHead[i] = (struct proc *) 0;
+    queueTail[i] = (struct proc *) 0;
+  }
+
   initproc = p;
   if((p->pgdir = setupkvm()) == 0)
     panic("userinit: out of memory?");
@@ -149,6 +223,10 @@ userinit(void)
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
+  p->budget = DEFAULT_BUDGET;
+  ptable.PromoteAtTime = ticks + TICKS_TO_PROMOTE;
+
+  setpriority(p->pid, 1);
 
   release(&ptable.lock);
 }
@@ -326,32 +404,75 @@ scheduler(void)
   struct cpu *c = mycpu();
   c->proc = 0;
   
+  uint preProcessTicks = 0;
+  uint postProcessTicks = 0;
+  uint ticksTime = 0;
+
   for(;;){
     // Enable interrupts on this processor.
     sti();
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
+    // Periodic Priority Adjustment => SOHAM BAGCHI
+    
+    acquire(&tickslock);
+    ticksTime = ticks;
+    release(&tickslock);
+    cprintf("%d", ticks);
+    if(ticksTime >= ptable.PromoteAtTime){  // Checks if ticks have exceeded PromoteAtTime (SOHAM BAGCHI)
+      for(int i = 1; i < MAXPRIORITY; i++){
+        // Dequeues entire priority queue
+        if(isEmpty(i) == 0)
+          continue;
+        else {
+          // Initializes pointer to store current 
+          struct proc * temp;
+          //while((temp = dequeue(i)) != (struct proc *) -1)
+          //  enqueue(temp, i - 1);
+          while(isEmpty(i) != 0){
+            temp = dequeue(i);
+            enqueue(temp, i - 1);
+          }
+        }
+      }
+    }
+    
+
+    for(int i = 0; i < MAXPRIORITY; i++){
+      if(isEmpty(i) == 0)
         continue;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
+      p = dequeue(i);
+      if(p->state != RUNNABLE)
+        continue;
+      
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
 
+      acquire(&tickslock);
+      preProcessTicks = ticks; //pre-run timestamp for budget (SOHAM)
+      release(&tickslock);
+      
       swtch(&(c->scheduler), p->context);
       switchkvm();
 
+      acquire(&tickslock);
+      postProcessTicks = ticks; //post-run timestamp for budget (SOHAM)
+      release(&tickslock);
+      p->budget = p->budget - (postProcessTicks - preProcessTicks); //set new budget
+
+      if(p->budget <= 0 && i < MAXPRIORITY - 1)
+        enqueue(p, i + 1);
+      else
+        enqueue(p, i);
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
     }
+    cli();
     release(&ptable.lock);
-
   }
 }
 
