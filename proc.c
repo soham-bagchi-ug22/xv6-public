@@ -7,10 +7,13 @@
 #include "proc.h"
 #include "spinlock.h"
 
-struct {
+struct ptable{
   struct spinlock lock;
   struct proc proc[NPROC];
-} ptable;
+};
+
+// Declare as a global
+struct ptable ptable;
 
 static struct proc *initproc;
 
