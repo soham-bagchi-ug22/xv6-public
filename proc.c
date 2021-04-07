@@ -7,6 +7,10 @@
 #include "proc.h"
 #include "spinlock.h"
 
+
+#include <stdlib.h>
+#include <time.h>
+
 struct ptable{
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -202,6 +206,7 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+  np->tickets = curproc->tickets;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -333,20 +338,55 @@ scheduler(void)
     // Enable interrupts on this processor.
     sti();
 
-    // Loop over process table looking for process to run.
+
     acquire(&ptable.lock);
+    int sum_tickets = 0;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+    
+      if (p->state == RUNNABLE)
+      {
+        int curr_tickets = p->tickets;
+        sum_tickets = sum_tickets + curr_tickets;
+      }
+
+    }
+
+    // Pick a number from 1 to Total no. of Tickets, ie sum_tickets
+    // Use ticks as seed 
+    unsigned int ticks_seed = ticks;
+    srand(ticks_seed);
+    int x = rand() % sum_tickets;
+
+    // Reset sum_tickets
+    sum_tickets = 0;
+
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      
+      if (p->state != RUNNABLE) 
+      continue;
+
+      int curr_tickets = p->tickets;
+      sum_tickets = sum_tickets + curr_tickets;
+
+      if (x <= (sum_tickets - curr_tickets) || x > sum_tickets)
+      continue;
 
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
+      c->proc = p;  // Update CPU state with the currently running process
+      switchuvm(p); // Tells hardware to start using process's page table
       p->state = RUNNING;
+      // Now that we are in user mode, we can set inuse to 1
+      p->inuse = 1;
+      int freezeTick1 = ticks; // Record ticks before proc runs  
 
-      swtch(&(c->scheduler), p->context);
+      // Using swtch, we can now actually run the process
+      swtch(&(c->scheduler), p->context); // Switch takes 2 arguments: old context and new context
+      int freezeTick2 = ticks; // Record ticks after proc has run
+      int diff = freezeTick2 - freezeTick1;
+      p->ticks = p->ticks + diff;
+
       switchkvm();
 
       // Process is done running for now.

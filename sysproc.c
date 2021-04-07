@@ -120,7 +120,7 @@ sys_settickets(void)
   }
   else 
   {
-    if (num < 1)
+    if (num < 1 && num > MAXTICKETS)
     {
       // User passed in a number that is less that 1
       return -1;  
