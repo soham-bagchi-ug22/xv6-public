@@ -1,6 +1,6 @@
-#define DEFAULT_BUDGET 15
+#define DEFAULT_BUDGET 100
 #define MAXPRIORITY 4
-#define TICKS_TO_PROMOTE 25
+#define TICKS_TO_PROMOTE 500
 
 // Per-CPU state
 struct cpu {
