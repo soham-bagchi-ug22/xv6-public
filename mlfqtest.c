@@ -45,7 +45,7 @@ int main(){
 					if(rc4 < 0)
 						printf(1, "fork error\n");
 					else if(rc4 == 0){
-						printf(1, "you've reached the toddler process\n");
+						printf(1, "you've reached the toddler process (pid:%d)\n", (int) getpid());
 					}
 		
 					else{
