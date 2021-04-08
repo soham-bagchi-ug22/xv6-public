@@ -24,10 +24,21 @@ extern void trapret(void);
 static void wakeup1(void *chan);
 
 // SOHAM BAGCHI LINKED LIST QUEUE FUNCTIONS (adjusted to use ptable queues)
+
+int
+isEmpty(int priority){
+	if(ptable.queueHead[priority] == (struct proc *) 0 && 
+     ptable.queueTail[priority] == (struct proc *) 0)
+		return 0;
+	else return -1;
+}
+
+
 int
 enqueue(struct proc *p, int priority){
   p->priority = priority;
-	if(ptable.queueHead[priority] == ptable.queueTail[priority] && ptable.queueTail[priority] == (struct proc *) 0) {
+	if(ptable.queueHead[priority] == ptable.queueTail[priority] && 
+     ptable.queueTail[priority] == (struct proc *) 0) {
 		p->next = (struct proc *) 0;
     ptable.queueHead[priority] = p;
 		ptable.queueTail[priority] = p;
@@ -52,7 +63,8 @@ enqueue(struct proc *p, int priority){
 
 struct proc *
 dequeue(int priority){
-	if(ptable.queueHead[priority] == ptable.queueTail[priority] && ptable.queueTail[priority] == (struct proc *) 0) { // It is empty
+	if(ptable.queueHead[priority] == ptable.queueTail[priority] && 
+     ptable.queueTail[priority] == (struct proc *) 0) { // It is empty
     //cprintf("Q%dH -> %p\n", priority, ptable.queueHead[priority]);
     //cprintf("Q%dT -> %p\n", priority, ptable.queueTail[priority]);
 
@@ -80,13 +92,6 @@ dequeue(int priority){
 	}
 }
 
-int
-isEmpty(int priority){
-	if(ptable.queueHead[priority] == (struct proc *) 0 && ptable.queueTail[priority] == (struct proc *) 0)
-		return 0;
-	else return -1;
-}
-
 void
 pinit(void)
 {
@@ -107,17 +112,22 @@ getpriority(int pidIn){
 // Sets process priority level => SOHAM BAGCHI
 int
 setpriority(int pidIn, int priorityIn){
-  struct proc *p;
-  if(priorityIn >= MAXPRIORITY) return -1;
-  acquire(&ptable.lock);
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p->pid == pidIn){
+  struct proc *p = myproc();
+  struct proc *q;
+  if(p->pid != pidIn || priorityIn >= MAXPRIORITY)
+    return -1;
+  else{
+    acquire(&ptable.lock);
+    for(q = ptable.queueHead[p->priority]; q->next != p; q = q->next){
+      q->next = p->next;
       p->budget = DEFAULT_BUDGET;
       enqueue(p, priorityIn);
+      release(&ptable.lock);
+      return 0;
     }
+    release(&ptable.lock);
+    return -1;
   }
-  release(&ptable.lock);
-  return -1;
 }
 
 // Must be called with interrupts disabled
@@ -219,7 +229,7 @@ userinit(void)
 
   p = allocproc();
   
-  acquire(&ptable.lock);
+  acquire(&ptable.lock); // SOHAM -> INITIALIZES THE PROCESS QUEUES
   for(int i = 0; i < MAXPRIORITY; i++){
     ptable.queueHead[i] = (struct proc *) 0;
     ptable.queueTail[i] = (struct proc *) 0;
@@ -255,7 +265,7 @@ userinit(void)
   //cprintf("%d", ptable.PromoteAtTime);
 
   //setpriority(p->pid, 0); //COMMENTED OUT BECAUSE IT CAUSES "panic: acquire"
-  enqueue(p, 0);
+  enqueue(p, 0); // QUEUES THE FIRST PROCESS ON HIGHEST PRIORITY QUEUE
 
   release(&ptable.lock);
 }
@@ -444,21 +454,30 @@ scheduler(void)
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
 
+    // Identifies the current highest priority 
+    // non-empty queue -> SOHAM BAGCHI
     for(int i = 0; i < MAXPRIORITY; i++){
       if(isEmpty(i) == -1){
         currentMax = i;
         break;
       }
     }
-        
+    
+    // Runs the queue until it is empty
     while(isEmpty(currentMax) != 0){
+      // Obtains current head of queue
       p = dequeue(currentMax);
+
+      // Error if queue is empty
       if(p == (struct proc *) -1){
         cprintf("-1 error\n");
         continue;
       }
+      // If the process is not RUNNABLE, it adds it back
+      // to the tail of the same queue
       else if(p->state != RUNNABLE){
         enqueue(p, currentMax);
+        // This increment was required to prevent some forever loops
         currentMax++;
         continue;
       }
@@ -473,13 +492,20 @@ scheduler(void)
       swtch(&(c->scheduler), p->context);
       switchkvm();
       
+      // decrements budget to calculate allocated runtime
       p->budget--;
+
+
+      // If process has exited (in ZOMBIE state) 
+      // we do not want to add it to priority queues
       if(p->state != ZOMBIE){
+        // If budget is over, then we move it to the next queue
         if(p->budget < 0 && currentMax < MAXPRIORITY - 1){
           p->budget = DEFAULT_BUDGET;
           //cprintf("enqueuing %s on %d\n", p->name, currentMax + 1);
           enqueue(p, currentMax + 1);
         }
+        // Otherwise it is being moved to the current queue
         else {
           //cprintf("enqueuing %s on %d\n", p->name, currentMax);
           enqueue(p, currentMax);
