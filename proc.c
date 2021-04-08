@@ -5,19 +5,18 @@
 #include "mmu.h"
 #include "x86.h"
 #include "proc.h"
+#include "pstat.h"
 #include "spinlock.h"
 
 
-#include <stdlib.h>
-#include <time.h>
-
-struct ptable{
+struct {
   struct spinlock lock;
   struct proc proc[NPROC];
-};
+}ptable;
 
-// Declare as a global
-struct ptable ptable;
+// // Declare as a global
+// struct ptable ptable;
+
 
 static struct proc *initproc;
 
@@ -95,6 +94,7 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->tickets = 1;       // Set default number of tickets to 1
 
   release(&ptable.lock);
 
@@ -327,6 +327,113 @@ wait(void)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
+
+// =========================================
+// Implement the two syscalls here as we do not have access to ptable in sysproc.c
+int 
+sys_settickets(void)
+{
+  int num;
+  int return_val = argint(0, &num);
+  if (return_val == -1)
+  {
+    // Indicating that the value obtained at the address stored in %ebx
+    // is not within the current process space. This implies that we need
+    // to revert to the default case of setting the no. of tickets of the 
+    // current process to 1 
+    struct proc *ptr = myproc();
+    ptr->tickets = 1;
+    return 0;
+    
+  }
+  else 
+  {
+    if (num < 1 && num > MAXTICKETS)
+    {
+      // User passed in a number that is less that 1
+      return -1;  
+    }
+
+    struct proc *ptr = myproc();
+    ptr->tickets = num;
+    return 0;
+
+  }
+}
+
+// Getpinfo() syscall
+int 
+sys_getpinfo(void)
+{
+ 
+  acquire(&ptable.lock);
+  struct pstat *ptr1;
+  struct proc *proc1; // We declare a process that we will use to iterate over the processes in the process table
+  
+  int return_val = argptr(0, (void*)&ptr1, sizeof(*ptr1));
+  if (return_val != 0)
+  {
+    return -1;
+  }
+  else
+  {
+    // Check if the pointer that the user entered is valid
+    // i.e., check if it is not a bad/NULL pointer
+    if (ptr1 == 0)
+    {
+      return -1;
+    }
+    
+
+    for (proc1 = ptable.proc; proc1 < &ptable.proc[NPROC]; proc1++)
+    {
+      int i = proc1 - ptable.proc; // We subtract the address of the current proc from that of the first proc in the proc array   
+      if (proc1->state != UNUSED)  // If a process is unused, it has not been initialized as of now
+      {
+        ptr1->inuse[i] = proc1->inuse;
+        ptr1->tickets[i] = proc1->tickets;
+        ptr1->pid[i] = proc1->pid;
+        ptr1->ticks[i] = proc1->ticks;
+      }
+    }
+
+    release(&ptable.lock);
+    return 0;
+  
+    
+
+  }
+
+
+}
+
+// =========================================
+
+// =========================================
+// Citation: Standard C library's implementation of srand and rand
+static unsigned long int next = 1;
+
+void srand(unsigned int seed)
+{
+  next = seed;
+}
+
+int rand_gen(int sum_tickets) // RAND_MAX assumed to be 32767
+{
+  next = next * 1103515245 + 12345;
+  return (unsigned int)(next/65536) % (sum_tickets+1);
+}
+
+int GeneratePSRandom(int ticksnum, int sum_tickets)
+{
+  srand(ticksnum);
+  int x = rand_gen(sum_tickets);
+  return x;
+}
+
+
+// =========================================
+
 void
 scheduler(void)
 {
@@ -335,45 +442,39 @@ scheduler(void)
   c->proc = 0;
   
   for(;;){
+
     // Enable interrupts on this processor.
     sti();
 
+    int sum_tickets = 0; 
+    int cumul_tickets = 0;
 
-    acquire(&ptable.lock);
-    int sum_tickets = 0;
+    acquire(&ptable.lock);    
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    
-      if (p->state == RUNNABLE)
-      {
-        int curr_tickets = p->tickets;
-        sum_tickets = sum_tickets + curr_tickets;
-      }
+      
+      if (p->state != RUNNABLE)
+        continue;
+      int curr_tickets = p->tickets;
+      sum_tickets = sum_tickets + curr_tickets; 
 
     }
 
-    // Pick a number from 1 to Total no. of Tickets, ie sum_tickets
-    // Use ticks as seed 
-    unsigned int ticks_seed = ticks;
-    srand(ticks_seed);
-    int x = rand() % sum_tickets;
-
-    // Reset sum_tickets
-    sum_tickets = 0;
+    // Pick a number from 1 to Total no. of Tickets, ie sum_tickets using ticks as seed
+    int ticksnum = ticks; 
+    int x = GeneratePSRandom(ticksnum, sum_tickets);
 
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       
       if (p->state != RUNNABLE) 
-      continue;
+        continue;
 
       int curr_tickets = p->tickets;
-      sum_tickets = sum_tickets + curr_tickets;
+      cumul_tickets = cumul_tickets + curr_tickets;
 
-      if (x <= (sum_tickets - curr_tickets) || x > sum_tickets)
-      continue;
+      if (x <= (cumul_tickets - curr_tickets) || x > cumul_tickets)
+        continue;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
+      // Switch to chosen process.  
       c->proc = p;  // Update CPU state with the currently running process
       switchuvm(p); // Tells hardware to start using process's page table
       p->state = RUNNING;
@@ -392,6 +493,7 @@ scheduler(void)
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
+      break;
     }
     release(&ptable.lock);
 
